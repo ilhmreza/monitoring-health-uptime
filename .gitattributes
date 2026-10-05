@@ -1,0 +1,33 @@
+# Keep shell scripts executable and LF-only.
+#
+# Without this, a script committed from Windows is stored with CRLF and Linux
+# refuses to run it: "install.sh: /usr/bin/env: 'bash^M': No such file or
+# directory". It is a confusing failure because the file looks correct.
+* text=auto
+
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+*.sql text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+Caddyfile text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# The vendored front-end libraries are minified third-party files.
+src/uptimebot/static/*.min.js -diff linguist-vendored
+src/uptimebot/static/chart.umd.min.js -diff linguist-vendored
+
+# Caddy TLS material and anything that looks like a private key must never be
+# normalised into the index by accident.
+*.pem binary
+*.key binary
+*.crt binary
+*.p12 binary
+
+# Runtime state.
+data/** binary
+*.db binary

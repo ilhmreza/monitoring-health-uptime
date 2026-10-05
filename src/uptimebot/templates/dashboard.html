@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% set active_page = 'dashboard' %}
+{% block title %}Dashboard · UptimeBot{% endblock %}
+
+{% block head %}
+<meta http-equiv="refresh" content="60">
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Dashboard</h1>
+  <div class="spacer"></div>
+  <a class="btn btn-primary" href="/monitors/new">+ Tambah monitor</a>
+</div>
+
+{% if not state.discord_webhook %}
+  <div class="notice notice-error">
+    <strong>DISCORD_WEBHOOK_URL belum diisi.</strong>
+    Notifikasi tidak akan terkirim. Isi di <code>.env</code> lalu restart container.
+  </div>
+{% endif %}
+{% if not state.discord_resolver %}
+  <div class="notice notice-warn">
+    Auto-resolve <code>@username</code> belum aktif. Isi
+    <code>DISCORD_BOT_TOKEN</code>, <code>DISCORD_GUILD_ID</code> dan
+    <code>DISCORD_REPORT_CHANNEL_ID</code> untuk mengaktifkannya.
+    Sampai saat itu, masukkan User ID Discord secara manual.
+  </div>
+{% endif %}
+
+<div class="tiles">
+  <div class="tile muted">
+    <div class="label">Total</div>
+    <div class="value">{{ counts.total }}</div>
+  </div>
+  <div class="tile up">
+    <div class="label">UP</div>
+    <div class="value">{{ counts.up }}</div>
+  </div>
+  <div class="tile down">
+    <div class="label">DOWN</div>
+    <div class="value">{{ counts.down }}</div>
+  </div>
+  <div class="tile muted">
+    <div class="label">Dijeda</div>
+    <div class="value">{{ counts.paused }}</div>
+  </div>
+  <div class="tile warn">
+    <div class="label">Scheduler</div>
+    <div class="value" style="font-size:15px;padding-top:6px">
+      {{ scheduler.monitor_tasks }} task{% if scheduler.last_delivery_error %}
+      <div class="small" style="color:var(--down);font-weight:400">error kirim terakhir</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div id="live-table"
+     hx-get="/partials/monitor-table"
+     hx-trigger="every 5s"
+     hx-swap="innerHTML">
+  {% include "partials/monitor_table.html" %}
+</div>
+{% endblock %}

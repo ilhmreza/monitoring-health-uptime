@@ -1,0 +1,122 @@
+# Two containers on one network: the app, and Caddy in front of it for TLS.
+#
+# The app publishes no host port at all. The only way in is through Caddy, so
+# there is no plain-HTTP path to the admin UI and no forgotten port mapping that
+# quietly exposes it.
+#
+#   cp .env.example .env      # then fill it in
+#   docker compose up -d
+
+services:
+  uptimebot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overridden here so the volume path matches the mount below regardless
+      # of what DATABASE_PATH says in .env.
+      DATABASE_PATH: /data/uptimebot.db
+      # Safe to enable *only* because the Caddyfile replaces X-Forwarded-For
+      # with the connecting address instead of appending to whatever the client
+      # sent. The app uses that header for one thing: keying the login throttle
+      # per client. Left off, every visitor shares the proxy's address and one
+      # attacker can lock the admin out permanently by spending the attempt
+      # budget. If you ever put a different proxy in front that appends to
+      # X-Forwarded-For, set this back to false.
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      # Secrets arrive as files, not env vars. Docker Compose expands `$name`
+      # inside an env_file value, which silently deletes everything from the
+      # second `$` of a bcrypt hash ($2b$12$salt...) — the result is a hash
+      # that cannot be parsed, so nobody can ever log in, and no error says why.
+      # Neither quoting nor `$$` prevents it. A file sidesteps interpolation
+      # entirely; see README "Secrets".
+      UI_PASSWORD_HASH_FILE: /run/secrets/ui_password_hash
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      DISCORD_WEBHOOK_URL_FILE: /run/secrets/discord_webhook
+      DISCORD_BOT_TOKEN_FILE: /run/secrets/discord_bot_token
+    secrets:
+      - ui_password_hash
+      - secret_key
+      - discord_webhook
+      - discord_bot_token
+    volumes:
+      # The probe history, the outage durations and the audit trail all live in
+      # this one file. Losing it means losing the uptime numbers.
+      - uptimebot_data:/data
+    networks:
+      - internal
+    # Deliberately no `ports:`. Caddy is the only ingress.
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      uptimebot:
+        condition: service_healthy
+    ports:
+      # 80 is deliberately absent. It is only needed for the ACME HTTP-01
+      # challenge and for the http -> https redirect, and on this host it cannot
+      # be bound at all: Windows reserves it for HTTP.sys/WinRM, so
+      # `docker compose up` fails outright with "ports are not available".
+      # Caddy issues the certificate over TLS-ALPN-01 on 443 instead, which
+      # needs nothing but 443.
+      #
+      # On a normal Linux VPS, add this back — HTTP-01 is the more common
+      # challenge and the redirect is worth having:
+      #   - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      # The default is a placeholder, not a working address: Let's Encrypt
+      # rejects the reserved example.com domain, so leaving it unset means
+      # certificate issuance fails with an explicit "forbidden domain" error in
+      # the Caddy log. Set ACME_EMAIL in .env to a real mailbox you control.
+      # It has to keep a value here — Compose substitutes an empty string for an
+      # unset variable, and an empty value overrides the Caddyfile's own default,
+      # leaving a bare `email` line that Caddy refuses to parse.
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificate storage. Back this up or you will hit Let's Encrypt rate
+      # limits when rebuilding.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+# Each file holds exactly one secret, with no trailing newline mattering (the
+# app strips it). Create them once with:
+#   docker compose run --rm uptimebot python -m uptimebot hash-password > secrets/ui_password_hash
+#   docker compose run --rm uptimebot python -m uptimebot genkey         > secrets/secret_key
+#   : > secrets/discord_webhook
+secrets:
+  ui_password_hash:
+    file: ./secrets/ui_password_hash
+  secret_key:
+    file: ./secrets/secret_key
+  discord_webhook:
+    file: ./secrets/discord_webhook
+  discord_bot_token:
+    file: ./secrets/discord_bot_token
+
+volumes:
+  uptimebot_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% set active_page = 'ssl' %}
+{% block title %}Sertifikat SSL · UptimeBot{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Sertifikat SSL</h1>
+  <div class="spacer"></div>
+  <a class="btn btn-ghost" href="/">Kembali</a>
+</div>
+<p class="muted small" style="margin-top:-12px">
+  Masa berlaku sertifikat untuk semua monitor yang mengaktifkan pemeriksaan SSL.
+  Diurutkan dari yang paling mendesak.
+</p>
+
+{% if rows %}
+<div class="table-wrap" style="margin-top:16px">
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Monitor</th>
+        <th>Host</th>
+        <th>Issuer</th>
+        <th>Berlaku sampai (UTC)</th>
+        <th class="num">Sisa</th>
+        <th>Diperiksa</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in rows %}
+      {% set badge = ssl_badge(s.severity or 0, s.days_left) %}
+      <tr>
+        <td>
+          <span class="badge {{ badge.css }}">{{ badge.text }}</span>
+        </td>
+        <td class="name">
+          <a href="/monitors/{{ s.monitor_id }}">
+            {{ s.monitor_name or s.monitor_id }}
+            {% if s.monitor_enabled is not none and not s.monitor_enabled %}
+            <span class="badge paused">dijeda</span>{% endif %}
+          </a>
+        </td>
+        <td class="mono small">{{ s.host or '—' }}</td>
+        <td class="small" style="white-space:normal;max-width:260px">{{ s.issuer or '—' }}</td>
+        <td class="small nowrap">{{ format_utc(s.not_after) }}</td>
+        <td class="num">
+          {% if s.days_left is none %}
+            <span class="muted">—</span>
+          {% elif s.days_left < 0 %}
+            <strong style="color:var(--down)">kedaluwarsa {{ format_relative(s.not_after) }}</strong>
+          {% else %}{{ s.days_left }} hari{% endif %}
+        </td>
+        <td class="muted small nowrap">{{ format_relative(s.last_checked_at) }}</td>
+        <td>
+          <a class="btn btn-sm" href="/monitors/{{ s.monitor_id }}">Edit</a>
+          <a class="btn btn-sm" href="/monitors/{{ s.monitor_id }}/history">Riwayat</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="muted small" style="margin-top:10px">
+  Halaman ini tidak melakukan probe sendiri; datanya dari pemeriksaan SSL terjadwal
+  terakhir untuk tiap monitor.
+</p>
+{% else %}
+<div class="card empty">
+  <p>Belum ada data sertifikat.</p>
+  <p class="small">Pastikan minimal satu monitor mengaktifkan pemeriksaan SSL dan bot sudah berjalan.</p>
+</div>
+{% endif %}
+{% endblock %}

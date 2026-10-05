@@ -1,0 +1,49 @@
+# Public HTTPS front end for UptimeBot.
+#
+# Caddy terminates TLS with a publicly trusted certificate and proxies to the
+# app on the internal network. The app itself is not published to the host, so
+# port 8000 is reachable only from this container.
+
+{
+	# ACME contact address. Must be a real mailbox you control: Let's Encrypt
+	# rejects the reserved example.com domain outright, so leaving the
+	# placeholder in place fails account registration with an error that looks
+	# unrelated. Caddy warns you before a rate limit is hit.
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$PUBLIC_HOST:localhost} {
+	encode zstd gzip
+
+	# The dashboard is a single-page-ish server-rendered app; these headers cost
+	# nothing and remove the obvious attack surface.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Probe history grows; serving it through the proxy should not be limited.
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy uptimebot:8000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		# Long-lived dashboard polling should not be cut off mid-stream.
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

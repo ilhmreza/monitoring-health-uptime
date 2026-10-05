@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="id" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}UptimeBot{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">
+    <span class="brand-dot"></span> UptimeBot
+  </a>
+  <nav class="nav">
+    <a href="/" class="{{ 'active' if active_page == 'dashboard' }}">Dashboard</a>
+    <a href="/ssl" class="{{ 'active' if active_page == 'ssl' }}">Sertifikat SSL</a>
+    <a href="/audit" class="{{ 'active' if active_page == 'audit' }}">Audit</a>
+  </nav>
+  <div class="topbar-right">
+    <span class="muted small">{{ session.username if session }}</span>
+    <form method="post" action="/logout" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token if session }}">
+      <button class="btn btn-ghost btn-sm" type="submit">Keluar</button>
+    </form>
+  </div>
+</header>
+
+<main class="container">
+  {% block content %}{% endblock %}
+</main>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

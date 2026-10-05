@@ -1,0 +1,68 @@
+# ============================================================
+#  Example config for one-time import:
+#    python -m uptimebot import-config config/monitors.example.yml
+#
+#  After import the SQLite database is the single source of truth
+#  and this file is no longer read. Edit monitors via the web UI.
+#
+#  Reminder: secrets do NOT belong in this file. For authenticated
+#  endpoints use headers_env to name an environment variable; the
+#  value is resolved from the process environment at check time and
+#  never written to the database.
+# ============================================================
+
+defaults:
+  interval_seconds: 30
+  timeout_seconds: 10
+  failure_threshold: 3
+  reminder_interval_minutes: 30
+
+discord:
+  # Fallback mention targets, applied when a monitor has none of its own.
+  notify_user_ids: []
+  notify_role_ids: []
+
+monitors:
+  - id: web-prod
+    name: Website Production
+    url: https://example.com
+    method: GET
+    expect_status: [200, 301, 302]
+    interval_seconds: 30
+    timeout_seconds: 10
+    failure_threshold: 3
+    notify_user_ids: []          # falls back to discord.notify_user_ids
+    notify_role_ids: []
+    notify_on: [down, recovery, ssl]
+    ssl_check: true
+    ssl_warn_days: [30, 14, 7, 1]
+    enabled: true
+
+  - id: api-prod
+    name: API Production
+    url: https://api.example.com/health
+    method: GET
+    expect_status: [200]
+    # The literal value never reaches the database — only the NAME
+    # of the environment variable is stored.
+    headers_env:
+      Authorization: "API_TOKEN_PROD"
+    keyword: "ok"
+    interval_seconds: 30
+    failure_threshold: 3
+    notify_role_ids: ["123456789012345678"]   # e.g. @On-Call
+    notify_on: [down, recovery, ssl]
+    ssl_check: true
+    # Legitimately monitoring something on your own LAN? Opt in explicitly.
+    allow_private_network: false
+    enabled: true
+
+  - id: db-internal
+    name: Database (internal)
+    url: https://db.internal.example.com/health
+    expect_status: [200]
+    allow_private_network: true
+    notify_role_ids: ["123456789012345678"]
+    notify_on: [down, recovery]
+    ssl_check: false
+    enabled: true

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set active_page = 'audit' %}
+{% block title %}Audit · UptimeBot{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Audit</h1>
+  <div class="spacer"></div>
+  <a class="btn btn-ghost" href="/">Kembali</a>
+</div>
+<p class="muted small" style="margin-top:-12px">
+  100 perubahan konfigurasi terbaru. Berguna saat sedang menyatroni
+  siapa yang mengubah interval atau recipient notifikasi.
+</p>
+
+{% if entries %}
+<div class="table-wrap" style="margin-top:16px">
+  <table>
+    <thead>
+      <tr><th>Waktu (UTC)</th><th>Actor</th><th>Aksi</th><th>Monitor</th><th>Detail</th></tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="muted small nowrap">{{ format_utc(e.ts) }}</td>
+        <td>{{ e.actor or '-' }}</td>
+        <td><span class="badge">{{ e.action }}</span></td>
+        <td class="small">
+          {% if e.monitor_id %}<a href="/monitors/{{ e.monitor_id }}">{{ e.monitor_id }}</a>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="small mono" style="white-space:normal;max-width:420px;color:var(--text-dim)">
+          {{ e.detail or '' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card empty">
+  <p>Belum ada perubahan konfigurasi tercatat.</p>
+</div>
+{% endif %}
+{% endblock %}

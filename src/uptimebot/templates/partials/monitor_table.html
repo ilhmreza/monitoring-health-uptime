@@ -1,0 +1,94 @@
+{#
+  Live monitor table. Rendered on the dashboard and swapped every 5 seconds by
+  HTMX, so a service flapping is visible without a page reload.
+#}
+{% if rows %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Nama</th>
+        <th>URL</th>
+        <th class="num">Respons</th>
+        <th class="num">Uptime 24j</th>
+        <th class="num">SSL</th>
+        <th class="num">DOWN sejak</th>
+        <th class="num">UP sejak</th>
+        <th>Terakhir dicek</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      {% set m = row.monitor %}
+      {% set st = row.effective_state.value %}
+      <tr>
+        <td>
+          <span class="dot {{ st }}"></span><span class="badge {{ st }}">{{ monitor_state_labels[st] }}</span>
+          {% if row.consecutive_failures and st == 'up' %}
+            <div class="muted small">gagal {{ row.consecutive_failures }}x (belum {{ m.failure_threshold }}x)</div>
+          {% endif %}
+        </td>
+        <td class="name"><a href="/monitors/{{ m.id }}">{{ m.name }}</a></td>
+        <td class="url" title="{{ m.url }}">{{ m.url }}</td>
+        <td class="num">
+          {% if row.last_latency_ms is not none %}
+            {{ '%.0f'|format(row.last_latency_ms) }} ms
+            {% if row.last_status_code %}<span class="muted small">{{ row.last_status_code }}</span>{% endif %}
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="num">
+          {% if row.uptime_24h is not none %}
+            {{ '%.2f'|format(row.uptime_24h) }}%
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="num">
+          {% if m.ssl_check and row.ssl and row.ssl.get('not_after') %}
+            {% set badge = ssl_badge(row.ssl.get('severity') or 0, row.ssl.get('days_left')) %}
+            <span class="badge {{ badge.css }}">{{ badge.text }}</span>
+          {% elif m.ssl_check %}
+            <span class="muted">—</span>
+          {% else %}
+            <span class="muted small">off</span>
+          {% endif %}
+        </td>
+        <td class="num">
+          {% if st == 'down' and row.downtime %}
+            <strong style="color:var(--down)">{{ format_duration(row.downtime) }}</strong>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="num">
+          {% if st == 'up' and row.uptime_run %}
+            {{ format_duration(row.uptime_run) }}
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="muted small nowrap">{{ row.last_check_label }}</td>
+        <td>
+          <div class="btn-row">
+            <a class="btn btn-sm" href="/monitors/{{ m.id }}">Edit</a>
+            <a class="btn btn-sm" href="/monitors/{{ m.id }}/history">Riwayat</a>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted small" style="margin-top:10px">
+  Diperbarui tiap 5 detik · respons = probe terakhir, uptime = 24 jam terakhir
+</p>
+{% else %}
+<div class="card empty">
+  <p>Belum ada monitor.</p>
+  <a class="btn btn-primary" href="/monitors/new">Tambah monitor pertama</a>
+</div>
+{% endif %}

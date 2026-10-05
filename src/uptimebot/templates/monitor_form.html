@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% set active_page = 'monitors' %}
+{% block title %}{{ 'Tambah monitor' if is_new else 'Edit monitor' }} · UptimeBot{% endblock %}
+
+{#
+  The editor doubles as the detail page: in edit mode the current state,
+  SSL certificate and recent failures are shown above the form.
+#}
+{% block content %}
+<div class="page-head">
+  <h1>{{ 'Tambah monitor' if is_new else f.name }}</h1>
+  <div class="spacer"></div>
+  {% if not is_new %}
+    <a class="btn" href="/monitors/{{ f.id }}/history">Riwayat &amp; grafik</a>
+  {% endif %}
+  <a class="btn btn-ghost" href="/">Kembali</a>
+</div>
+
+{% if flash %}<div class="notice notice-ok">{{ flash }}</div>{% endif %}
+{% if notice %}<div class="notice notice-error">{{ notice }}</div>{% endif %}
+{% if errors %}
+  <div class="notice notice-error">
+    <strong>Periksa kembali isian berikut:</strong>
+    <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+{% endif %}
+
+{% if not is_new and ssl %}
+<div class="card">
+  <h2>Sertifikat SSL saat ini</h2>
+  <p class="hint">Diperbarui {{ format_utc(ssl.get('last_checked_at')) }}</p>
+  <dl class="kv">
+    <dt>Issuer</dt><dd>{{ ssl.get('issuer', '-') }}</dd>
+    <dt>Berlaku sampai</dt><dd>{{ format_utc(ssl.get('not_after')) }}</dd>
+    <dt>Status</dt>
+    <dd>
+      {% set badge = ssl_badge(ssl.get('severity') or 0, ssl.get('days_left')) %}
+      <span class="badge {{ badge.css }}">{{ badge.text }}</span>
+    </dd>
+    <dt>Error terakhir</dt>
+    <dd>
+      {% if ssl.get('last_error') %}<span style="color:var(--down)">{{ ssl.get('last_error') }}</span>
+      {% else %}<span class="muted">Tidak ada</span>{% endif %}
+    </dd>
+  </dl>
+</div>
+{% endif %}
+
+<form method="post" action="{{ '/monitors' if is_new else '/monitors/' ~ f.id }}" id="monitor-form">
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+
+  <fieldset>
+    <legend>Target</legend>
+    <div class="grid">
+      <div class="field">
+        <label for="name">Nama monitor *</label>
+        <input type="text" id="name" name="name" value="{{ f.name }}" required maxlength="120"
+               placeholder="Contoh: API Produksi">
+        <p class="desc">Nama bebas, hanya tampil di dashboard dan Discord.</p>
+      </div>
+      <div class="field">
+        <label for="id">ID</label>
+        <input type="text" id="id" name="id" value="{{ f.id }}"
+               {{ 'disabled' if not is_new }} placeholder="dibuat otomatis dari nama">
+        <p class="desc">URL yang dipanggil probe. Wajib http:// atau https://.</p>
+      </div>
+    </div>
+    <div class="field">
+      <label for="url">URL *</label>
+      <input type="url" id="url" name="url" value="{{ f.url }}" required
+             placeholder="https://api.example.com/health" style="max-width:520px">
+    </div>
+    <div class="grid">
+      <div class="field">
+        <label for="method">Method</label>
+        <select id="method" name="method">
+          {% for m in ['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'] %}
+            <option value="{{ m }}" {{ 'selected' if f.method == m }}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="expect_status">Status dianggap sehat *</label>
+        <input type="text" id="expect_status" name="expect_status" value="{{ f.expect_status }}">
+        <p class="desc">Pisahkan koma. Contoh: <code>200</code> atau <code>200,204</code></p>
+      </div>
+      <div class="field">
+        <label for="keyword">Wajib mengandung teks</label>
+        <input type="text" id="keyword" name="keyword" value="{{ f.keyword }}"
+               placeholder="opsional, mis. &quot;ok&quot;">
+        <p class="desc">Hanya untuk respons GET/HEAD. Kosongkan jika tidak perlu. Jangan
+          isi untuk endpoint yang balas 204 atau tanpa body — pemeriksa akan selalu
+          menandainya DOWN karena tidak menemukan teksnya.</p>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Jadwal probe</legend>
+    <div class="grid">
+      <div class="field">
+        <label for="interval_seconds">Interval (detik) *</label>
+        <input type="number" id="interval_seconds" name="interval_seconds"
+               value="{{ f.interval_seconds }}" min="5" max="86400" required>
+        <p class="desc">Makin kecil, makin cepat terdeteksi, makin besar beban.</p>
+      </div>
+      <div class="field">
+        <label for="timeout_seconds">Timeout (detik) *</label>
+        <input type="number" id="timeout_seconds" name="timeout_seconds"
+               value="{{ f.timeout_seconds }}" min="1" max="120" required>
+      </div>
+      <div class="field">
+        <label for="failure_threshold">Batas kegagalan *</label>
+        <input type="number" id="failure_threshold" name="failure_threshold"
+               value="{{ f.failure_threshold }}" min="1" max="20" required>
+        <p class="desc">Alert DOWN dikirim setelah gagal sebanyak ini berturut-turut.</p>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Notifikasi Discord</legend>
+    <p class="desc" style="margin-bottom:12px">
+      Pilih jenis notifikasi, lalu tentukan siapa yang harus diberi tahu.
+    </p>
+    <div class="check">
+      <input type="checkbox" id="ev-down" name="notify_on" value="down" {{ 'checked' if 'down' in f.notify_on }}>
+      <label for="ev-down">Kirim saat DOWN
+        <span class="desc">Dil mengirim setelah {{ f.failure_threshold }} kegagalan berturut-turut.</span>
+      </label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="ev-recovery" name="notify_on" value="recovery" {{ 'checked' if 'recovery' in f.notify_on }}>
+      <label for="ev-recovery">Kirim saat pulih
+        <span class="desc">Dikirim begitu status kembali UP.</span>
+      </label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="ev-ssl" name="notify_on" value="ssl" {{ 'checked' if 'ssl' in f.notify_on }}>
+      <label for="ev-ssl">Kirim peringatan SSL
+        <span class="desc">Hanya berlaku bila pemeriksaan SSL diaktifkan.</span>
+      </label>
+    </div>
+
+    <div class="field rel">
+      <label for="notify_user_ids">User ID Discord</label>
+      <input type="text" id="notify_user_ids" name="notify_user_ids" value="{{ f.notify_user_ids }}"
+             placeholder="123456789012345678, 876543210987654321">
+      <p class="desc">
+        Maksimal 20 mention per pesan. Tempel User ID (klik kanan profil &rarr; Salin ID).
+        <button type="button" class="btn btn-sm" id="resolve-btn"
+                style="margin-left:6px" {{ '' if resolver_ready else 'disabled' }}>
+          Resolve @username
+        </button>
+      </p>
+      <ul class="suggestions" id="user-suggestions" hidden></ul>
+    </div>
+    <div class="field">
+      <label for="notify_role_ids">Role ID Discord</label>
+      <input type="text" id="notify_role_ids" name="notify_role_ids" value="{{ f.notify_role_ids }}"
+             placeholder="112233445566778899">
+      <p class="desc">Pakai format &lt;@&amp;123&gt; juga diterima.</p>
+    </div>
+    {% if not resolver_ready %}
+      <div class="notice notice-warn small">
+        Auto-resolve <code>@username</code> belum aktif, jadi User ID wajib diisi manual.
+      </div>
+    {% endif %}
+  </fieldset>
+
+  <fieldset>
+    <legend>Header dari environment</legend>
+    <div class="field">
+      <label for="headers_env">Header &rarr; nama environment variable</label>
+      <textarea id="headers_env" name="headers_env" rows="4"
+                placeholder="Authorization: API_TOKEN&#10;X-Api-Key: PARTNER_KEY">{{ f.headers_env }}</textarea>
+      <p class="desc">
+        Satu per baris, format <code>Nama-Header: NAMA_ENV</code>.
+        Yang disimpan hanya <em>nama</em> variabelnya; nilainya dibaca dari
+        environment container saat probe berjalan, jadi token tidak pernah masuk
+        database atau form.
+      </p>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Sertifikat SSL</legend>
+    <div class="check">
+      <input type="checkbox" id="ssl_check" name="ssl_check" {{ 'checked' if f.ssl_check }}>
+      <label for="ssl_check">Periksa masa berlaku sertifikat
+        <span class="desc">Membaca sertifikat secara langsung tanpa verifikasi chain, agar sertifikat kedaluwarsa tetap terdeteksi.</span>
+      </label>
+    </div>
+    <div class="field">
+      <label for="ssl_warn_days">Ambang peringatan (hari)</label>
+      <input type="text" id="ssl_warn_days" name="ssl_warn_days" value="{{ f.ssl_warn_days }}"
+             style="max-width:280px">
+      <p class="desc">Peringatan naik bertahap: mis. <code>30,14,7,1</code> plus pengingat
+        saat benar-benar kedaluwarsa. Kosongkan untuk memakai bawaan sistem.</p>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Jaringan &amp; status</legend>
+    <div class="check">
+      <input type="checkbox" id="allow_private_network" name="allow_private_network"
+             {{ 'checked' if f.allow_private_network }}>
+      <label for="allow_private_network">Izinkan alamat jaringan privat
+        <span class="desc">
+          Matikan untuk server publik. Nyalakan hanya jika target memang internal
+          (IP private / loopback) dan ini memang disengaja.
+        </span>
+      </label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="enabled" name="enabled" {{ 'checked' if f.enabled }}>
+      <label for="enabled">Aktifkan monitor
+        <span class="desc">Monitor nonaktif tidak diprobe dan tidak mengirim notifikasi.</span>
+      </label>
+    </div>
+  </fieldset>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" type="submit">{{ 'Tambah monitor' if is_new else 'Simpan perubahan' }}</button>
+    <a class="btn btn-ghost" href="/">Batal</a>
+    {% if not is_new %}
+      <div class="spacer" style="margin-left:auto"></div>
+      <button class="btn" type="submit" formaction="/monitors/{{ f.id }}/toggle" formnovalidate>
+        {{ 'Aktifkan' if not f.enabled else 'Jeda' }} monitor
+      </button>
+      <button class="btn btn-danger" type="submit" formaction="/monitors/{{ f.id }}/delete"
+              onclick="return confirm('Hapus monitor ini? Riwayat dan notifikasinya ikut terhapus.')">
+        Hapus
+      </button>
+    {% endif %}
+  </div>
+</form>
+
+{% if not is_new %}
+<div class="card" style="margin-top:20px">
+  <h2>Tes notifikasi</h2>
+  <p class="hint">Mengirim pesan contoh ke channel Discord. Tidak mengubah status monitor.</p>
+  <div class="btn-row">
+    <form method="post" action="/monitors/{{ f.id }}/test" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <input type="text" name="note" placeholder="catatan (opsional)" style="width:260px;margin-right:8px">
+      <button class="btn" type="submit">Kirim alert contoh</button>
+    </form>
+    <form method="post" action="/monitors/{{ f.id }}/test-mention" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <button class="btn" type="submit">Tes mention</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const csrf = {{ session.csrf_token | tojson }};
+  const list = document.getElementById('user-suggestions');
+  const input = document.getElementById('notify_user_ids');
+  const button = document.getElementById('resolve-btn');
+
+  const hide = () => { list.hidden = true; list.innerHTML = ''; };
+  const appendId = (id) => {
+    const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!current.includes(id)) current.push(id);
+    input.value = current.join(', ');
+  };
+
+  async function search(term) {
+    if (term.length < 2) return hide();
+    const res = await fetch('/api/users?q=' + encodeURIComponent(term), {headers: {'HX-Request': 'true'}});
+    if (!res.ok) return hide();
+    const data = await res.json();
+    const users = data.users || [];
+    if (!users.length) return hide();
+    list.innerHTML = '';
+    for (const u of users) {
+      const li = document.createElement('li');
+      li.textContent = (u.username ? '@' + u.username : u.user_id) +
+                       (u.global_name ? ' · ' + u.global_name : '');
+      li.onclick = () => { appendId(u.user_id); hide(); };
+      list.appendChild(li);
+    }
+    list.hidden = false;
+  }
+
+  let timer;
+  input?.addEventListener('input', () => {
+    clearTimeout(timer);
+    // Debounced so every keystroke does not hit the server.
+    timer = setTimeout(() => search(input.value.split(',').pop().trim()), 220);
+  });
+  document.addEventListener('click', (e) => {
+    if (!list.contains(e.target) && e.target !== input) hide();
+  });
+
+  button?.addEventListener('click', async () => {
+    const term = prompt('Nama username Discord yang mau di-resolve:');
+    if (!term) return;
+    button.disabled = true;
+    button.textContent = 'Mencari…';
+    try {
+      const res = await fetch('/api/resolve-user', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+        body: JSON.stringify({q: term})
+      });
+      const data = await res.json();
+      if (data.ok) {
+        appendId(data.user_id);
+        alert('Ketemu: ' + (data.username ? '@' + data.username : data.user_id));
+      } else {
+        alert('Gagal: ' + (data.error || data.detail || 'tidak dikenal'));
+      }
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Resolve @username';
+    }
+  });
+})();
+</script>
+{% endblock %}

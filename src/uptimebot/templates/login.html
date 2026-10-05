@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% set active_page = 'login' %}
+{% block title %}Masuk · UptimeBot{% endblock %}
+
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="login-wrap">
+  {% if not configured %}
+    <div class="card">
+      <h2>UI belum dikonfigurasi</h2>
+      <p class="hint">Set variabel berikut di file <code>.env</code>, lalu restart container.</p>
+      <div class="notice notice-error">
+        <strong>Wajib:</strong> <code>UI_PASSWORD_HASH</code> dan <code>SECRET_KEY</code>
+      </div>
+      <p class="muted small mono">python -m uptimebot genkey<br>python -m uptimebot hash-password</p>
+    </div>
+  {% else %}
+    <div class="card">
+      <h2>Masuk</h2>
+      <p class="hint">Monitoring uptime &amp; sertifikat SSL</p>
+
+      {% if error %}
+        <div class="notice notice-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login" autocomplete="on">
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" required autofocus
+                 autocomplete="username" autocapitalize="none" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required
+                 autocomplete="current-password">
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%">Masuk</button>
+      </form>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

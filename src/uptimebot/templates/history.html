@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% set active_page = 'dashboard' %}
+{% block title %}Riwayat {{ monitor.name }} · UptimeBot{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>{{ monitor.name }}</h1>
+  <div class="spacer"></div>
+  <a class="btn" href="/monitors/{{ monitor.id }}">Edit</a>
+  <a class="btn btn-ghost" href="/">Kembali</a>
+</div>
+<p class="muted small mono" style="margin-top:-12px">{{ monitor.url }}</p>
+
+<div class="tabs">
+  {% for key, label in ranges.items() %}
+    <a href="/monitors/{{ monitor.id }}/history?range={{ key }}"
+       class="{{ 'active' if key == range_key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+<div class="tiles">
+  <div class="tile up">
+    <div class="label">Uptime {{ stats.window_label }}</div>
+    <div class="value">
+      {% if stats.uptime_percent is not none %}{{ '%.3f'|format(stats.uptime_percent) }}%{% else %}—{% endif %}
+    </div>
+  </div>
+  <div class="tile">
+    <div class="label">Probe</div>
+    <div class="value">{{ stats.total }}</div>
+  </div>
+  <div class="tile">
+    <div class="label">Gagal</div>
+    <div class="value" style="color:{{ 'var(--down)' if stats.total - stats.successful > 0 else 'var(--up)' }}">
+      {{ stats.total - stats.successful }}
+    </div>
+  </div>
+  <div class="tile">
+    <div class="label">Rata-rata</div>
+    <div class="value" style="font-size:19px;padding-top:7px">
+      {% if stats.avg_latency_ms is not none %}{{ '%.0f'|format(stats.avg_latency_ms) }} ms{% else %}—{% endif %}
+    </div>
+  </div>
+  <div class="tile">
+    <div class="label">p95</div>
+    <div class="value" style="font-size:19px;padding-top:7px">
+      {% if stats.p95_latency_ms is not none %}{{ '%.0f'|format(stats.p95_latency_ms) }} ms{% else %}—{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Uptime &amp; waktu respons</h2>
+  <p class="hint">
+    Batang tinggi = lebih banyak UP. Garis = waktu respons rata-rata per bucket.
+  </p>
+  <div class="chart-box tall">
+    <canvas id="history-chart"
+            data-monitor="{{ monitor.id }}"
+            data-range="{{ range_key }}"
+            data-api="/api/history/{{ monitor.id }}?range={{ range_key }}"></canvas>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Kegagalan terakhir</h2>
+  <p class="hint">20 probe gagal terbaru beserta penyebabnya.</p>
+  {% if failures %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Waktu (UTC)</th><th>Error</th><th>Jenis</th><th class="num">Respons</th></tr>
+        </thead>
+        <tbody>
+          {% for f in failures %}
+          <tr>
+            <td class="muted small nowrap">{{ format_utc(f.ts) }}</td>
+            <td>{{ f.error or '—' }}</td>
+            <td><span class="badge down">{{ f.failure_kind or 'unknown' }}</span></td>
+            <td class="num muted">{{ f.latency_ms if f.latency_ms is not none else '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty">Tidak ada kegagalan tercatat pada rentang ini.</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/chart.umd.min.js"></script>
+<script>
+(() => {
+  const canvas = document.getElementById('history-chart');
+  if (!canvas) return;
+  const api = canvas.dataset.api;
+  const dark = '#8b949e';
+  const grid = 'rgba(48,54,61,.8)';
+
+  fetch(api, {headers: {'HX-Request': 'true'}})
+    .then(r => r.json())
+    .then(data => {
+      const points = data.buckets || [];
+      if (!points.length) {
+        canvas.closest('.chart-box').innerHTML =
+          '<div class="empty">Belum ada data untuk rentang ini.</div>';
+        return;
+      }
+      new Chart(canvas, {
+        data: {
+          labels: points.map(p => new Date(p.t).toLocaleString()),
+          datasets: [
+            {
+              type: 'bar',
+              label: 'Uptime %',
+              data: points.map(p => p.uptime),
+              backgroundColor: points.map(p => p.uptime === 100
+                ? 'rgba(46,160,67,.65)' : 'rgba(248,81,73,.7)'),
+              borderRadius: 2,
+              yAxisID: 'y',
+              order: 2,
+            },
+            {
+              type: 'line',
+              label: 'Respons (ms)',
+              data: points.map(p => p.latency),
+              borderColor: '#2f81f7',
+              backgroundColor: 'rgba(47,129,247,.15)',
+              borderWidth: 1.5,
+              pointRadius: 0,
+              tension: 0.25,
+              spanGaps: true,
+              yAxisID: 'y1',
+              order: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {mode: 'index', intersect: false},
+          scales: {
+            y: {
+              position: 'left', min: 0, max: 100,
+              ticks: {color: dark, callback: v => v + '%'},
+              grid: {color: grid},
+            },
+            y1: {
+              position: 'right', beginAtZero: true,
+              ticks: {color: dark, callback: v => v + ' ms'},
+              grid: {drawOnChartArea: false},
+            },
+            x: {
+              ticks: {color: dark, maxTicksLimit: 10, maxRotation: 0},
+              grid: {display: false},
+            },
+          },
+          plugins: {
+            legend: {labels: {color: dark, boxWidth: 12}},
+            tooltip: {
+              callbacks: {
+                afterBody: (items) => {
+                  const p = points[items[0].dataIndex];
+                  return p.total === 0
+                    ? 'tidak ada probe'
+                    : `${p.successful}/${p.total} probe sukses`;
+                }
+              }
+            }
+          }
+        }
+      });
+    })
+    .catch(() => {
+      canvas.closest('.chart-box').innerHTML =
+        '<div class="empty">Gagal memuat data grafik.</div>';
+    });
+})();
+</script>
+{% endblock %}

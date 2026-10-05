@@ -1,0 +1,13 @@
+httpx==0.28.1
+cryptography==44.0.1
+PyYAML==6.0.2
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+jinja2==3.1.5
+python-multipart==0.0.20
+itsdangerous==2.2.0
+bcrypt==4.2.1
+aiosqlite==0.20.0
+# Windows and slim images have no system tz database, so ZoneInfo("Asia/Jakarta")
+# would fail there. Bundling the data makes the container image self-contained.
+tzdata==2024.2

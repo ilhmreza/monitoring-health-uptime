@@ -1,0 +1,26 @@
+.git/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+data/
+caddy_data/
+caddy_config/
+.env
+.env.*
+!.env.example
+# Never bake credentials into an image layer. Compose mounts these at
+# /run/secrets instead, so excluding them here closes a real exfiltration path
+# for anyone who builds and pushes this image.
+secrets/
+README.md
+docker-compose.yml
+Dockerfile
+.vscode/
+.idea/
