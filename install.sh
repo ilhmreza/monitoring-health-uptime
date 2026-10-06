@@ -153,15 +153,33 @@ set_env TRUST_PROXY true
 
 mkdir -p secrets
 
+# Compose bind-mounts a file-backed secret with the host file's ownership intact.
+# The app runs as uid 10001, so a file owned by whoever ran the installer is
+# unreadable from inside the container on Linux: `chmod 600` looks right on the
+# host and then fails in the container with EACCES. Docker Desktop tolerates it;
+# Linux does not.
+#
+# So: owner rwx, group r, everyone nothing. GID_SECRET must match the gid the
+# Dockerfile gives the uptimebot user (999 by default), and is passed in as a
+# build arg so the two cannot drift.
+GID_SECRET="${GID_SECRET:-999}"
+
+secure_secret() {
+    local path="$1"
+    chmod 640 "$path"
+    chgrp "$GID_SECRET" "$path" 2>/dev/null || \
+        warn "could not chgrp $path to $GID_SECRET; run as root or set GID_SECRET"
+}
+
 # The password arrives through the container environment rather than as a command
 # line argument, so it does not show up in `ps` output.
 write_secret() {
     local name="$1"
     if [ -s "secrets/$name" ]; then
-        # Re-run safety: never overwrite what already exists. Tighten the mode
-        # anyway, since a hand-made or previously world-readable file would
-        # otherwise stay that way.
-        chmod 600 "secrets/$name"
+        # Re-run safety: never overwrite what already exists. Fix the ownership
+        # and mode anyway, since a hand-made or previously world-readable file
+        # would otherwise stay that way.
+        secure_secret "secrets/$name"
         printf '    secrets/%s already exists, keeping it\n' "$name"
         return 0
     fi
@@ -203,7 +221,7 @@ write_secret() {
             printf '    created empty secrets/%s, fill it in before enabling alerts\n' "$name"
             ;;
     esac
-    chmod 600 "secrets/$name"
+    secure_secret "secrets/$name"
 }
 
 say "Generating secrets"
@@ -212,7 +230,9 @@ write_secret ui_password_hash
 # Created empty on purpose: these are credentials that only exist inside Discord.
 [ -e secrets/discord_webhook ] || { : >secrets/discord_webhook; printf '    created empty secrets/discord_webhook\n'; }
 [ -e secrets/discord_bot_token ] || { : >secrets/discord_bot_token; printf '    created empty secrets/discord_bot_token\n'; }
-chmod 600 secrets/discord_webhook secrets/discord_bot_token
+secure_secret secrets/discord_webhook
+secure_secret secrets/discord_bot_token
+printf '    secrets are mode 640 group %s (must match the container gid)\n' "$GID_SECRET"
 
 if [ ! -s secrets/ui_password_hash ]; then
     die "secrets/ui_password_hash came out empty; cannot continue"
@@ -262,6 +282,18 @@ fi
 
 say "Validating the compose configuration"
 $DOCKER_COMPOSE config --quiet || die "compose configuration is invalid"
+
+say "Confirming the container can actually read the secrets"
+# Cheap and worth doing: without this the app crash-loops with an EACCES on
+# /run/secrets and the only symptom is an unhealthy container.
+for s in ui_password_hash secret_key discord_webhook discord_bot_token; do
+    if $DOCKER_COMPOSE run --rm --no-deps -T --entrypoint sh uptimebot \
+        -c "test -r /run/secrets/$s" >/dev/null 2>&1; then
+        printf '    %-20s readable inside the container\n' "$s"
+    else
+        die "secrets/$s is not readable as uid 10001 inside the container; check its owner and group (GID_SECRET=$GID_SECRET)"
+    fi
+done
 
 # ----------------------------------------------------------------------- start
 

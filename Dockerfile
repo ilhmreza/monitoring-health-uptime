@@ -54,6 +54,16 @@ RUN mkdir -p /data \
     && useradd --system --uid 10001 --home-dir /app uptimebot \
     && chown -R uptimebot:uptimebot /data
 
+# The group that owns the bind-mounted secret files on the host. Compose mounts
+# a file-backed secret with the host file's ownership intact, so the mode is not
+# something this image can relax from the inside -- the container has to match
+# whatever uid the operator gave those files. Naming the group here gives
+# install.sh something concrete to chgrp to, and GID_SECRET is what the process
+# falls back to as its primary group.
+ARG GID_SECRET=999
+RUN usermod --gid "$GID_SECRET" uptimebot
+ENV GID_SECRET="$GID_SECRET"
+
 USER uptimebot
 
 VOLUME ["/data"]

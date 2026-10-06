@@ -9,7 +9,15 @@
 
 services:
   uptimebot:
-    build: .
+    build:
+      context: .
+      args:
+        # The image's uptimebot user gets this gid as its primary group, and the
+        # host-side secret files are chgrp'ed to match. A bind-mounted secret
+        # keeps the host file's ownership, so a 640 file owned by root:root is
+        # unreadable from inside the container; this is what keeps that true on
+        # both sides instead of only on the image side.
+        GID_SECRET: ${GID_SECRET:-999}
     restart: unless-stopped
     env_file:
       - .env
@@ -76,6 +84,10 @@ services:
       # On a normal Linux VPS, add this back — HTTP-01 is the more common
       # challenge and the redirect is worth having:
       #   - "80:80"
+      #
+      # On a host where nginx already owns 80, publish a non-standard port
+      # instead and let install.sh --no-port-80 write an override that replaces
+      # this list. Never add 80 back on such a host.
       - "443:443"
       - "443:443/udp" # HTTP/3
     environment:
