@@ -12,12 +12,12 @@ services:
     build:
       context: .
       args:
-        # The image's uptimebot user gets this gid as its primary group, and the
-        # host-side secret files are chgrp'ed to match. A bind-mounted secret
-        # keeps the host file's ownership, so a 640 file owned by root:root is
-        # unreadable from inside the container; this is what keeps that true on
-        # both sides instead of only on the image side.
-        GID_SECRET: ${GID_SECRET:-999}
+        # The app user's primary group. It must match the group that owns the
+        # secret files on the host, because a bind-mounted secret keeps the host
+        # file's ownership and the container reads it as a different uid.
+        # install.sh sets this in .env from `id -g`; the 1000 fallback is only
+        # for a bare `docker compose up` where .env was made by hand.
+        GID_SECRET: ${GID_SECRET:-1000}
     restart: unless-stopped
     env_file:
       - .env

@@ -159,16 +159,37 @@ mkdir -p secrets
 # host and then fails in the container with EACCES. Docker Desktop tolerates it;
 # Linux does not.
 #
-# So: owner rwx, group r, everyone nothing. GID_SECRET must match the gid the
-# Dockerfile gives the uptimebot user (999 by default), and is passed in as a
-# build arg so the two cannot drift.
-GID_SECRET="${GID_SECRET:-999}"
+# The fix is group-read rather than owner-read, because a bind mount keeps the
+# host's uid and the container is a different uid. The group has to be one the
+# installer can actually put a file into without root, which rules out picking
+# an arbitrary gid: `chgrp 999` fails for an unprivileged user unless they are
+# already a member, and 999 is commonly something else entirely (systemd-journal
+# on Ubuntu 24.04).
+#
+# So the default is the installer's own primary group: files created here are
+# already in it, no chgrp is needed, and no root is needed. The Dockerfile gets
+# the same gid as a build arg and makes it the app user's primary group, so both
+# sides agree by construction. Override GID_SECRET only if you manage the group
+# out of band.
+GID_SECRET="${GID_SECRET:-$(id -g)}"
+# Exported, not just set: docker-compose.yml reads ${GID_SECRET:-1000} for the
+# build arg, and an unexported shell variable would leave the image building
+# with the fallback gid while these files sit in the installer's group.
+export GID_SECRET
+printf '    secrets will be readable by group %s (uid %s), and by no one else\n' \
+    "$GID_SECRET" "$(id -u)"
 
 secure_secret() {
     local path="$1"
     chmod 640 "$path"
-    chgrp "$GID_SECRET" "$path" 2>/dev/null || \
-        warn "could not chgrp $path to $GID_SECRET; run as root or set GID_SECRET"
+    # Only needed when GID_SECRET was overridden or an old file was placed by
+    # another user; for the default this is already true.
+    local want="$GID_SECRET" have
+    have=$(stat -c '%g' "$path" 2>/dev/null || echo "")
+    if [ "$have" != "$want" ]; then
+        chgrp "$want" "$path" 2>/dev/null || \
+            warn "could not chgrp $path from gid $have to $want (need membership in that group, or root)"
+    fi
 }
 
 # The password arrives through the container environment rather than as a command
@@ -283,6 +304,12 @@ fi
 say "Validating the compose configuration"
 $DOCKER_COMPOSE config --quiet || die "compose configuration is invalid"
 
+say "Building the image"
+# Before the readability check, not after: the check runs the image, and an
+# image built before GID_SECRET existed still has the app user in the old group.
+# Verifying first would test yesterday's image and report a false failure.
+$DOCKER_COMPOSE build
+
 say "Confirming the container can actually read the secrets"
 # Cheap and worth doing: without this the app crash-loops with an EACCES on
 # /run/secrets and the only symptom is an unhealthy container.
@@ -297,8 +324,8 @@ done
 
 # ----------------------------------------------------------------------- start
 
-say "Building and starting"
-$DOCKER_COMPOSE up -d --build
+say "Starting"
+$DOCKER_COMPOSE up -d
 
 say "Waiting for the health check"
 for i in $(seq 1 60); do
@@ -328,8 +355,10 @@ cat <<'NEXT'
 Next steps
   1. Alerts. Paste the Discord webhook URL into secrets/discord_webhook, then:
        echo -n 'https://discord.com/api/webhooks/<id>/<token>' | sudo tee secrets/discord_webhook >/dev/null
-       sudo chmod 600 secrets/discord_webhook
+       sudo chmod 640 secrets/discord_webhook
        sudo docker compose up -d
+     (640, not 600: the container reads this as uid 10001, so the file has to be
+      group-readable. The group is the one you ran the installer as.)
      Verify with: curl -s http://127.0.0.1:8000/healthz | grep -o '"discord_webhook":[a-z]*'
      (that is inside the container: sudo docker compose exec -T uptimebot \\
         python -c "import json,urllib.request;print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/healthz'))['discord_webhook'])")

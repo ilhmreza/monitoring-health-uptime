@@ -60,8 +60,17 @@ RUN mkdir -p /data \
 # whatever uid the operator gave those files. Naming the group here gives
 # install.sh something concrete to chgrp to, and GID_SECRET is what the process
 # falls back to as its primary group.
-ARG GID_SECRET=999
-RUN usermod --gid "$GID_SECRET" uptimebot
+# GID_SECRET is the gid that owns the bind-mounted secret files on the host.
+# Compose mounts a file-backed secret with the host file's ownership intact, so
+# the mode is not something this image can relax from the inside -- the container
+# has to be able to read the files under the mode the operator chose. The group
+# is created at that gid and made the app user's primary group, so a 640 file
+# owned by <installer>:<GID_SECRET> is readable in here and unreadable to anyone
+# else on the host. install.sh passes `id -g` here so no chgrp or root is needed.
+ARG GID_SECRET=1000
+RUN groupadd --gid "$GID_SECRET" --system uptimebot-secrets \
+    && usermod --gid "$GID_SECRET" uptimebot \
+    && chown -R uptimebot:"$GID_SECRET" /data
 ENV GID_SECRET="$GID_SECRET"
 
 USER uptimebot
