@@ -22,6 +22,7 @@ EMAIL=""
 SKIP_PORT_CHECK=0
 ASSUME_YES=0
 NO_PORT_80=0
+TUNNEL=0
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -43,6 +44,10 @@ Options:
   --no-port-80        never publish port 80; use this when nginx or another
                       server already owns it. Certificate issuance then goes
                       through TLS-ALPN-01 on 443, which needs nothing else.
+  --tunnel            deploy behind a Cloudflare Tunnel: Caddy serves the
+                      internal CA instead of ACME (no --email needed, nothing
+                      has to be reachable inbound). Add the tunnel's Public
+                      Hostname separately; see the README.
   -y, --yes           do not prompt for the admin password
   -h, --help          show this message
 
@@ -57,6 +62,7 @@ while [ $# -gt 0 ]; do
         --email)  EMAIL="${2:-}";  shift 2 ;;
         --skip-port-check) SKIP_PORT_CHECK=1; shift ;;
         --no-port-80) NO_PORT_80=1; shift ;;
+        --tunnel) TUNNEL=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1 (try --help)" ;;
@@ -81,6 +87,7 @@ printf '    compose: %s\n' "$(docker compose version --short)"
 PUBLIC_HOST="localhost"
 PUBLIC_URL="https://localhost"
 ACME_EMAIL=""
+CADDYFILE_VALUE="./Caddyfile"
 
 if [ -n "$DOMAIN" ]; then
     # Refuse the placeholders. Let's Encrypt answers "invalidContact ...
@@ -96,17 +103,30 @@ if [ -n "$DOMAIN" ]; then
     esac
     PUBLIC_HOST="$DOMAIN"
     PUBLIC_URL="https://$DOMAIN"
-    [ -n "$EMAIL" ] || die "--email is required together with --domain"
-    case "$EMAIL" in
-        *@*.*) : ;;
-        *) die "--email '$EMAIL' does not look like an address" ;;
-    esac
-    case "$EMAIL" in
-        *example.com|*example.org)
-            die "--email '$EMAIL' is rejected by Let's Encrypt (forbidden domain)" ;;
-    esac
-    ACME_EMAIL="$EMAIL"
+    if [ "$TUNNEL" -eq 1 ]; then
+        # cloudflared dials out and reaches Caddy on localhost, so Caddy serves
+        # its internal CA with no ACME account and no --email; the public name is
+        # only used to build absolute links. PUBLIC_HOST stays localhost so the
+        # certificate matches the SNI cloudflared sends.
+        PUBLIC_HOST="localhost"
+        CADDYFILE_VALUE="./Caddyfile.cloudflared"
+        printf '    Cloudflare Tunnel mode: Caddy uses its internal CA; no ACME\n'
+    else
+        [ -n "$EMAIL" ] || die "--email is required together with --domain"
+        case "$EMAIL" in
+            *@*.*) : ;;
+            *) die "--email '$EMAIL' does not look like an address" ;;
+        esac
+        case "$EMAIL" in
+            *example.com|*example.org)
+                die "--email '$EMAIL' is rejected by Let's Encrypt (forbidden domain)" ;;
+        esac
+        ACME_EMAIL="$EMAIL"
+    fi
 else
+    if [ "$TUNNEL" -eq 1 ]; then
+        die "--tunnel requires --domain (the public hostname)"
+    fi
     warn "no --domain given: serving https://localhost with an internal CA"
     warn "browsers will warn about the certificate; this is not a public deployment"
 fi
@@ -140,6 +160,7 @@ set_env() {
 
 set_env PUBLIC_HOST "$PUBLIC_HOST"
 set_env PUBLIC_URL "$PUBLIC_URL"
+set_env CADDYFILE "$CADDYFILE_VALUE"
 if [ -n "$ACME_EMAIL" ]; then
     set_env ACME_EMAIL "$ACME_EMAIL"
 fi
@@ -349,6 +370,28 @@ say "Done"
 printf '    URL          %s\n' "$PUBLIC_URL"
 printf '    username     %s\n' "$(grep -E '^UI_USERNAME=' .env | cut -d= -f2- | head -n1)"
 printf '    password     the one you entered during install\n'
+
+if [ "$TUNNEL" -eq 1 ]; then
+    cat <<'TUNNELNEXT'
+
+Cloudflare Tunnel (this deployment)
+  1. Install the connector and register the tunnel. Create the tunnel at
+     Zero Trust > Networks > Tunnels > Create a tunnel > Cloudflared, then:
+       curl -fsSL -o /tmp/cloudflared.deb \
+         https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+       sudo dpkg -i /tmp/cloudflared.deb
+       sudo cloudflared service install <TOKEN>   # token from the tunnel's page
+  2. On that tunnel, add a Public Hostname:
+       <your domain>  ->  Service HTTPS  https://localhost:<caddy-port>
+     where <caddy-port> is the host side of Caddy's 443 mapping (443 by default,
+     or the port in docker-compose.override.yml when 443 is taken).
+  3. Let cloudflared trust Caddy's internal CA (otherwise the origin is rejected
+     with "certificate signed by unknown authority"):
+       docker compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt \
+         | sudo tee /usr/local/share/ca-certificates/caddy-uptimebot.crt >/dev/null
+       sudo update-ca-certificates && sudo systemctl restart cloudflared
+TUNNELNEXT
+fi
 
 cat <<'NEXT'
 

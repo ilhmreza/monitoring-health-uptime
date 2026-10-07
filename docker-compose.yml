@@ -101,7 +101,10 @@ services:
       # leaving a bare `email` line that Caddy refuses to parse.
       ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Which Caddyfile to run. The default is the direct/ACME one. Behind a
+      # Cloudflare Tunnel (no inbound ports, internal TLS) set
+      # CADDYFILE=./Caddyfile.cloudflared in .env instead; see README.
+      - ${CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
       # Certificate storage. Back this up or you will hit Let's Encrypt rate
       # limits when rebuilding.
       - caddy_data:/data

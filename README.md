@@ -52,6 +52,66 @@ docker compose run --rm uptimebot python -m uptimebot genkey
 docker compose run --rm uptimebot python -m uptimebot hash-password
 ```
 
+### Behind a Cloudflare Tunnel (no inbound ports)
+
+Use this when the host has no public IP and no port is forwarded to it, so Caddy
+cannot answer an ACME challenge and visitors cannot reach it at all. A Cloudflare
+Tunnel inverts the flow: `cloudflared` dials *out* to Cloudflare and Cloudflare
+routes the public hostname down that connection, so nothing is published and no
+public certificate is required.
+
+```bash
+# 1. Install the connector (Debian/Ubuntu, x86_64).
+curl -fsSL -o /tmp/cloudflared.deb \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i /tmp/cloudflared.deb
+
+# 2. Zero Trust > Networks > Tunnels > Create a tunnel > Cloudflared.
+#    Copy the token from the install page, then:
+sudo cloudflared service install <TOKEN>
+
+# 3. On the same tunnel add a Public Hostname:
+#      Subdomain/Domain : monitoring.example.com
+#      Service          : https://localhost:<caddy-port>
+#    where <caddy-port> is the host side of the Caddy 443 mapping in
+#    docker-compose.yml — 443 by default, or the non-standard port from your
+#    docker-compose.override.yml when something else already owns 443.
+#    Leave "No TLS Verify" off if you trust the internal CA (below).
+```
+
+Then point the stack at the tunnel Caddyfile in `.env`:
+
+```ini
+PUBLIC_URL=https://monitoring.example.com
+CADDYFILE=./Caddyfile.cloudflared
+```
+
+`PUBLIC_HOST` stays `localhost`: `cloudflared` connects to Caddy over the
+loopback, so the origin certificate only has to match `localhost`. The public
+name lives in `PUBLIC_URL`, which is what the app uses to build absolute links.
+
+`Caddyfile.cloudflared` serves that single `localhost` site with Caddy's
+**internal** CA (no certificate is fetched from Let's Encrypt, so `ACME_EMAIL`
+is unused) and takes the client IP from `CF-Connecting-IP`, which keeps the
+login throttle per visitor instead of collapsing everyone into the tunnel's own
+address. Because that origin certificate is internal, tell `cloudflared` to
+trust Caddy's root:
+
+```bash
+docker compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt \
+  | sudo tee /usr/local/share/ca-certificates/caddy-uptimebot.crt >/dev/null
+sudo update-ca-certificates
+sudo systemctl restart cloudflared
+```
+
+(Or turn on **No TLS Verify** for the public hostname in the dashboard instead.)
+Finally:
+
+```bash
+docker compose up -d
+curl -fsS https://monitoring.example.com/healthz
+```
+
 ### Without Docker
 
 Needs Python 3.12 or newer.

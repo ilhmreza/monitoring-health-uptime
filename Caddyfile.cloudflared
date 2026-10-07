@@ -1,0 +1,54 @@
+# Caddyfile for a deployment behind a Cloudflare Tunnel (see README).
+#
+# cloudflared dials out to Cloudflare and connects to Caddy on localhost, so
+# there is no public certificate to obtain: Caddy serves its own internal CA and
+# cloudflared is told to trust it (or the tunnel sets "No TLS Verify"). Because
+# the tunnel is the only client, a single localhost site handles every request
+# regardless of the Host header Cloudflare forwards.
+#
+# The one thing that differs from the direct Caddyfile: cloudflared connects
+# from 127.0.0.1, so the connecting address is useless for keying the login
+# throttle. Cloudflare sets CF-Connecting-IP to the real visitor, and that is
+# what gets forwarded.
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+localhost {
+	tls internal
+
+	encode zstd gzip
+
+	# The dashboard is a single-page-ish server-rendered app; these headers cost
+	# nothing and remove the obvious attack surface.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Probe history grows; serving it through the proxy should not be limited.
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy uptimebot:8000 {
+		# The real client, not the tunnel. Without this every visitor shares
+		# 127.0.0.1 and the login throttle collapses into one bucket.
+		header_up X-Real-IP {http.request.header.Cf-Connecting-Ip}
+		header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
+
+		# Long-lived dashboard polling should not be cut off mid-stream.
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
